@@ -10,7 +10,7 @@
 
 import os
 from loguru import logger
-from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
 # Настройка логирования с использованием loguru
 logger.add("log/02_Simple_RAG_PDF.log", format="{time} {level} {message}", level="DEBUG", rotation="100 KB", compression="zip")
@@ -22,72 +22,57 @@ def get_index_db():
     """
     logger.debug('...get_index_db')
     
-    from langchain_huggingface import HuggingFaceEmbeddings
-    model_id = 'intfloat/multilingual-e5-large'
-    model_kwargs = {'device': 'cpu'}
-    embeddings = HuggingFaceEmbeddings(
-        model_name=model_id,
-        model_kwargs=model_kwargs
-    )
-
-    db_file_name = 'db/db_01'
-    file_path = db_file_name + "/index.faiss"
-    
-    # Проверяем, нужно ли пересоздать базу
-    need_rebuild = True
-    
-    if os.path.exists(file_path):
-        logger.debug('Векторная База-знаний существует')
+    try:
+        # Используем совместимые эмбеддинги
+        from langchain_community.embeddings import HuggingFaceEmbeddings
         
-        current_files = []
-        for root, dirs, files in os.walk('pdf'):
-            for file in files:
-                if file.endswith(".pdf") or file.endswith(".docx"):
-                    current_files.append(os.path.join(root, file))
+        # Используем меньшую модель для совместимости
+        model_id = 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'
+        model_kwargs = {'device': 'cpu'}
+        encode_kwargs = {'normalize_embeddings': False}
         
-        processed_files_file = db_file_name + "/processed_files.txt"
-        if os.path.exists(processed_files_file):
-            with open(processed_files_file, 'r', encoding='utf-8') as f:
-                processed_files = set(line.strip() for line in f.readlines())
-            
-            current_files_set = set(current_files)
-            if current_files_set == processed_files:
-                logger.debug('Новых файлов не обнаружено, загружаем существующую базу')
-                db = FAISS.load_local(db_file_name, embeddings, allow_dangerous_deserialization=True)
-                need_rebuild = False
-            else:
-                logger.debug('Обнаружены новые или измененные файлы, перестраиваем базу')
-        else:
-            logger.debug('Файл с метаданными обработанных файлов не найден, перестраиваем базу')
-    else:
-        logger.debug('Векторная База-знаний не существует, создаем новую')
+        embeddings = HuggingFaceEmbeddings(
+            model_name=model_id,
+            model_kwargs=model_kwargs,
+            encode_kwargs=encode_kwargs
+        )
 
-    if need_rebuild:
-        logger.debug('Создание/обновление векторной Базы-Знаний')
+        db_file_name = 'db/db_01'
+        file_path = db_file_name + "/index.faiss"
+        
+        # В облачной среде всегда пересоздаем базу (данные временные)
+        logger.debug('Создание/обновление векторной Базы-Знаний для облачной среды')
         
         from langchain_community.document_loaders import PyPDFLoader
-        # Используем простой загрузчик для DOCX без зависимостей от NLTK
         from langchain_community.document_loaders import Docx2txtLoader
+        import os
 
         dir = 'pdf'
         logger.debug(f'Document loaders. dir={dir}')
         documents = []
         current_files = []
         
+        # Проверяем, есть ли файлы в папке pdf
+        if not os.path.exists(dir):
+            os.makedirs(dir)
+            logger.warning(f'Создана пустая папка {dir}. Добавьте PDF/DOCX файлы.')
+            
         for root, dirs, files in os.walk(dir):
             for file in files:
                 file_path = os.path.join(root, file)
                 
                 if file.endswith(".pdf"):
                     logger.debug(f'Обработка PDF: {file_path}')
-                    loader = PyPDFLoader(file_path)
-                    documents.extend(loader.load())
-                    current_files.append(file_path)
-                    
+                    try:
+                        loader = PyPDFLoader(file_path)
+                        documents.extend(loader.load())
+                        current_files.append(file_path)
+                    except Exception as e:
+                        logger.error(f"Ошибка при загрузке PDF {file_path}: {e}")
+                        
                 elif file.endswith(".docx"):
                     logger.debug(f'Обработка DOCX: {file_path}')
                     try:
-                        # Используем Docx2txtLoader вместо UnstructuredWordDocumentLoader
                         loader = Docx2txtLoader(file_path)
                         docs = loader.load()
                         documents.extend(docs)
@@ -95,61 +80,56 @@ def get_index_db():
                         logger.debug(f"Успешно загружен DOCX файл: {file_path}")
                     except Exception as e:
                         logger.error(f"Ошибка при загрузке DOCX файла {file_path}: {e}")
-                        # Альтернатива: используем python-docx напрямую
-                        try:
-                            import docx
-                            doc = docx.Document(file_path)
-                            full_text = []
-                            for paragraph in doc.paragraphs:
-                                full_text.append(paragraph.text)
-                            from langchain_core.documents import Document
-                            doc_content = '\n'.join(full_text)
-                            documents.append(Document(page_content=doc_content, metadata={"source": file_path}))
-                            current_files.append(file_path)
-                            logger.debug(f"DOCX файл загружен через python-docx: {file_path}")
-                        except Exception as e2:
-                            logger.error(f"Ошибка при загрузке через python-docx {file_path}: {e2}")
 
         if not documents:
             logger.warning('Не найдено ни одного файла для обработки!')
             from langchain_core.documents import Document
-            documents = [Document(page_content="Нет данных", metadata={})]
+            # Создаем демо-документ для тестирования
+            documents = [Document(
+                page_content="Это демонстрационный документ. Добавьте PDF или DOCX файлы в папку 'pdf' для работы с реальными документами.", 
+                metadata={"source": "demo.txt"}
+            )]
 
         # Разделение документов на меньшие части (chunks)
         logger.debug('Разделение на chunks')
         from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1024, chunk_overlap=0)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=512, chunk_overlap=50)
         source_chunks = text_splitter.split_documents(documents)
-        logger.debug(f'Тип chunks: {type(source_chunks)}')
         logger.debug(f'Количество chunks: {len(source_chunks)}')
-        
-        if len(source_chunks) > 100:
-            logger.debug(source_chunks[100].metadata)
-            logger.debug(source_chunks[100].page_content)
-        elif source_chunks:
-            last_index = len(source_chunks) - 1
-            logger.debug(f"Последний элемент (индекс {last_index}): {source_chunks[last_index].metadata}")
-            logger.debug(f"Содержимое последнего элемента: {source_chunks[last_index].page_content}")
 
         logger.debug('Создание векторной Базы-Знаний')
-        if os.path.exists(file_path) and 'db' in locals():
-            logger.debug('Добавление новых документов в существующую базу')
-            db.add_documents(source_chunks)
-        else:
-            db = FAISS.from_documents(source_chunks, embeddings)
+        from langchain_community.vectorstores import FAISS
+        db = FAISS.from_documents(source_chunks, embeddings)
 
         logger.debug('Сохранение векторной Базы-Знаний в файл')
+        os.makedirs(db_file_name, exist_ok=True)
         db.save_local(db_file_name)
         
-        os.makedirs(db_file_name, exist_ok=True)
+        # Сохраняем список обработанных файлов
         processed_files_file = db_file_name + "/processed_files.txt"
         with open(processed_files_file, 'w', encoding='utf-8') as f:
             for file_path in current_files:
                 f.write(file_path + '\n')
         logger.debug(f'Список обработанных файлов сохранен в {processed_files_file}')
 
-    return db
+        return db
+        
+    except Exception as e:
+        logger.error(f"Ошибка при создании базы данных: {e}")
+        # Возвращаем минимальную рабочую базу в случае ошибки
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+        from langchain_community.vectorstores import FAISS
+        from langchain_core.documents import Document
+        
+        embeddings = HuggingFaceEmbeddings(
+            model_name='sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'
+        )
+        demo_docs = [Document(
+            page_content="Система временно недоступна. Проверьте логи для подробностей.", 
+            metadata={"source": "error.txt"}
+        )]
+        return FAISS.from_documents(demo_docs, embeddings)
 
 def get_message_content(topic, db, NUMBER_RELEVANT_CHUNKS):
     """
