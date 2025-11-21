@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Локальный RAG (Retrieval-Augmented Generation) и Агенты 
 В этих примерах использованы:
 
@@ -116,3 +117,6 @@ https://ollama.com/download/windows
 
 
 
+=======
+Диаграмма прицидентов
+>>>>>>> e9a4397316bb5f89951b57364d3b1c8844367d7a
