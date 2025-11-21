@@ -1,0 +1,6 @@
+pdf\AI Лаб 2.pdf
+pdf\AI Отчёт 1.pdf
+pdf\AI Отчёт 3.pdf
+pdf\Lab_1 Obzor bibliotek Python.pdf
+pdf\Lab_3 Prostya neyro_set na baze Nympy.pdf
+pdf\Lab_4а Raspoznav_obrazov+.pdf
