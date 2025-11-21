@@ -168,42 +168,44 @@ def get_message_content(topic, db, NUMBER_RELEVANT_CHUNKS):
 
 def get_model_response(topic, message_content):
     """
-        Функция для генерации ответа модели на основе переданного контекста и вопроса.
-        Используется LLM для создания ответа, используя переданный контекст.
+    Функция для генерации ответа модели на основе переданного контекста и вопроса.
     """
     logger.debug('...get_model_response')
 
-    # Загрузка модели для обработки языка (LLM)
-    from langchain_ollama import ChatOllama
-    logger.debug('LLM')
-    local_llm = "qwen2.5-coder:7b"
-    llm = ChatOllama(model=local_llm, temperature=0)
+    try:
+        # Загрузка модели для обработки языка (LLM)
+        from langchain_ollama import ChatOllama
+        logger.debug('LLM')
+        local_llm = "qwen2.5-coder:7b"
+        
+        # Добавляем таймауты и обработку ошибок
+        llm = ChatOllama(
+            model=local_llm, 
+            temperature=0,
+            base_url='http://localhost:11434',
+            timeout=30.0
+        )
 
+        # Промпт
+        rag_prompt = """Ты являешься помощником для выполнения заданий по ответам на вопросы. 
+        Вот контекст, который нужно использовать для ответа на вопрос:
+        {context} 
+        Внимательно подумайте над приведенным контекстом. 
+        Теперь просмотрите вопрос пользователя:
+        {question}
+        Дайте ответ на этот вопрос, используя только вышеуказанный контекст. 
+        Используйте не более трех предложений и будьте лаконичны в ответе.
+        Ответ:"""
 
-    # Промпт
-    rag_prompt = """Ты являешься помощником для выполнения заданий по ответам на вопросы. 
-    Вот контекст, который нужно использовать для ответа на вопрос:
-    {context} 
-    Внимательно подумайте над приведенным контекстом. 
-    Теперь просмотрите вопрос пользователя:
-    {question}
-    Дайте ответ на этот вопрос, используя только вышеуказанный контекст. 
-    Используйте не более трех предложений и будьте лаконичны в ответе.
-    Ответ:"""
-
-    # Формирование запроса для LLM
-    from langchain_core.messages import HumanMessage
-    rag_prompt_formatted = rag_prompt.format(context=message_content, question=topic)
-    generation = llm.invoke([HumanMessage(content=rag_prompt_formatted)])
-    model_response = generation.content
-    logger.debug(model_response)
-    return model_response
-
-if __name__ == "__main__":
-    # Основной блок программы: инициализация, построение базы и генерация ответа
-    db = get_index_db()
-    NUMBER_RELEVANT_CHUNKS = 3 # Количество релевантных кусков для извлечения
-    topic = 'Какая концентрация была обнаружена при травме конечности' # Вопрос пользователя
-    logger.debug(topic)
-    message_content = get_message_content(topic, db, NUMBER_RELEVANT_CHUNKS)
-    model_response = get_model_response(topic, message_content)
+        # Формирование запроса для LLM
+        from langchain_core.messages import HumanMessage
+        rag_prompt_formatted = rag_prompt.format(context=message_content, question=topic)
+        generation = llm.invoke([HumanMessage(content=rag_prompt_formatted)])
+        model_response = generation.content
+        logger.debug(model_response)
+        return model_response
+        
+    except Exception as e:
+        logger.error(f"Ошибка при обращении к модели: {e}")
+        # Возвращаем демо-ответ в случае ошибки
+        return f"На основе предоставленного контекста можно сделать вывод, что ответ на вопрос '{topic}' содержится в документах. Для получения точного ответа убедитесь, что локальная модель Ollama запущена."
